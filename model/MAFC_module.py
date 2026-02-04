@@ -75,28 +75,17 @@ class ChannelPool(nn.Module):
             else:
                 spa_all = torch.cat((spa_all, spa1), dim=1)
         return spa_all
-class SpatialGate_new1(nn.Module):
-    def __init__(self, gate_channel, reduction_ratio=8):
-        super(SpatialGate_new1, self).__init__()
-        cout=gate_channel//reduction_ratio
-        self.gate_s = nn.Sequential()
-        self.gate_s.add_module('gate_s_conv_reduce0', nn.Conv2d(gate_channel, cout, kernel_size=1))
-        self.convdw = nn.Conv2d(
-                in_channels=cout,
-                out_channels=cout,
-                kernel_size=7,
-                stride=1,
-                padding=3,
-                groups=cout,
-                bias=False)
-        self.gate_s.add_module('gate_s_conv_depthwise',self.convdw)
-        self.gate_s.add_module('gate_s_bn0',nn.BatchNorm2d(cout))
-        self.gate_s.add_module('gate_s_relu0',nn.ReLU())
-        self.gate_s.add_module('gate_s_conv_reduce', nn.Conv2d(cout, 1, kernel_size=1))
-
+class SpatialGate(nn.Module):
+    def __init__(self,pool_types=None):
+        super(SpatialGate, self).__init__()
+        kernel_size = 7
+        self.compress = ChannelPool(pool_types)
+        self.spatial = BasicConv(2, 1, kernel_size, stride=1, padding=(kernel_size-1) // 2, relu=False)
     def forward(self, x):
-        att = torch.sigmoid(self.gate_s(x))  
-        return x * att
+        x_compress = self.compress(x)
+        x_out = self.spatial(x_compress)
+        scale = F.sigmoid(x_out) # broadcasting
+        return x * scale
 
 class BAM(nn.Module):
     def __init__(self, gate_channels, reduction_ratio=16, pool_types=None, no_spatial=False,activation='relu',excite_activation="sigmoid"):
@@ -104,7 +93,7 @@ class BAM(nn.Module):
         self.ChannelGate = ChannelGate(gate_channels, reduction_ratio, pool_types,activation=activation,excite_activation=excite_activation)
         self.no_spatial=no_spatial
         if not no_spatial:
-            self.SpatialGate = SpatialGate_new1(gate_channels)
+            self.SpatialGate = SpatialGate(pool_types)
     def forward(self, x):
         x_out = self.ChannelGate(x)
         if not self.no_spatial:
